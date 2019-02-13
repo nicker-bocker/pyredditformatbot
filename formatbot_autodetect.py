@@ -1,37 +1,23 @@
 import configparser
 import re
+import time
+from datetime import datetime
+from datetime import timedelta
 from typing import Pattern
 
 import praw
+from praw.exceptions import APIException
 
 SUBREDDIT = 'learnpython'
-
-template_auto = (
-    "Hello u/{op}, I'm a bot that can assist you with code-formatting for reddit. "
+MAX_TIME_LAPSE = timedelta(minutes=30)
+TEMPLATE = (
+    "Hello u/{op}, I'm a bot that can assist you with code-formatting for reddit.\n"
     'I have detected the following potential issue(s) with your submission:\n\n'
     "{issues_str}\n\n"
     "If I am correct then please follow "
     "[these instructions](https://www.reddit.com/r/learnpython/wiki/faq#wiki_how_do_i_format_code.3F) "
     "to fix your code formatting. Thanks!"
 )
-
-
-def get_reddit():
-    """
-    Get a praw.Reddit instance from config
-    :return: praw.Reddit instance
-    """
-    config = configparser.ConfigParser()
-    config.read("formatbot.cfg")
-    reddit_config = config['Reddit']
-    reddit = praw.Reddit(
-        client_id=reddit_config['client_id'],
-        client_secret=reddit_config['client_secret'],
-        username=reddit_config['username'],
-        password=reddit_config['password'],
-        user_agent='CodeFormatBot',
-    )
-    return reddit
 
 
 class Issue:
@@ -59,24 +45,45 @@ class IssueCodeBlock(Issue):
         |for\s.*?in.*?          #for loop detection
         ):
         ''', re.VERBOSE | re.MULTILINE)
-    description = "Python code found in submission but not encapsulated in a code block."
+    description = "Python code found in submission text but not encapsulated in a code block."
 
 
-issues = [
+VALIDATORS = [
     IssueMultiInline(),
     IssueCodeBlock(),
 ]
 
 
-def main():
-    reddit = get_reddit()
+def get_reddit():
+    """
+    Get a praw.Reddit instance from config
+    """
+    config = configparser.ConfigParser()
+    config.read("formatbot.cfg")
+    reddit_config = config['Reddit']
+    reddit = praw.Reddit(
+        client_id=reddit_config['client_id'],
+        client_secret=reddit_config['client_secret'],
+        username=reddit_config['username'],
+        password=reddit_config['password'],
+        user_agent='CodeFormatBot',
+    )
+    return reddit
+
+
+def get_comment(op, issues):
+    issues_str = '\n'.join(f'{i}. {description}'
+                           for i, description in enumerate(issues, 1))
+    return TEMPLATE.format(op=op, issues_str=issues_str)
+
+
+def judge_submissions(reddit):
     subreddit = reddit.subreddit(SUBREDDIT)
-    submission: praw.reddit.models.Submission
     me = reddit.user.me().name.lower()
     for submission in subreddit.stream.submissions():
-        text = submission.selftext
         op = submission.author.name
-        issues_found = [x.description for x in issues if x.is_issue(text)]
+        body_text = submission.selftext
+        issues_found = [v.description for v in VALIDATORS if v.is_issue(body_text)]
         if not issues_found:
             print(f"no issues with {op}'s post")
             continue
@@ -85,10 +92,24 @@ def main():
                 print(f"I've already commented on {op}'s post.")
                 break
         else:
-            issues_str = '\n'.join(f'{i}. {des}' for i, des in enumerate(issues_found, 1))
-            my_comment = template_auto.format(op=op, issues_str=issues_str)
-            submission.reply(my_comment)
-            print('Replied to', op)
+            print('I GOT BEEF WITH', op)
+            time_created = datetime.fromtimestamp(submission.created_utc)
+            time_current = datetime.now()
+            is_recent = (time_current - time_created <= MAX_TIME_LAPSE)
+            if is_recent:
+                try:
+                    submission.reply(get_comment(op, issues_found))
+                    print('Replied to', op)
+                    time.sleep(10 * 60)  # comment cool-down, need karma!
+                except APIException as exc:
+                    print(exc)
+            else:
+                print('...but post is old.')
+
+
+def main():
+    reddit = get_reddit()
+    judge_submissions(reddit)
 
 
 if __name__ == '__main__':
