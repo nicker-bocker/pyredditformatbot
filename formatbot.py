@@ -1,9 +1,13 @@
 import configparser
 import re
 import time
-from datetime import datetime, timedelta
+from datetime import datetime
+from datetime import timedelta
 
 import praw
+from loguru import logger
+
+logger.add("formatbot.log", backtrace=True)
 
 SUBREDDIT = 'learnpython'
 MAX_TIME_LAPSE = timedelta(minutes=30)
@@ -15,36 +19,48 @@ TEMPLATE = (
     "to fix your code formatting. Thanks!"
 )
 
-class BaseIssue:
-    pattern = description = None
 
-    def is_issue(self, text):
-        if self.pattern is None:
-            raise NotImplementedError('Pattern not defined')
-        search = self.pattern.search(text)
-        return bool(search)
+class BaseIssue:
+    _pattern = None
+    _description = None
+
+    def __str__(self):
+        if self._description is None:
+            mssg = f'No error description assigned to {type(self).__name__}._description'
+            logger.error(mssg)
+            raise NotImplementedError(mssg)
+        return self._description
+
+    def is_issue(self, submission_text):
+        try:
+            return bool(self._pattern.search(submission_text))
+        except AttributeError:
+            mssg = f'No error compiled regex object assigned to {type(self).__name__}._pattern'
+            logger.error(mssg)
+            raise NotImplementedError(mssg)
 
 
 class MultipleInlineIssue(BaseIssue):
-    description = "Multiple consecutive lines have been found to contain inline formatting."
-    pattern = re.compile(r'(?:\s*?`.*?`\s*?[\n]+){2,}', re.MULTILINE)
+    _description = "Multiple consecutive lines have been found to contain inline formatting."
+    _pattern = re.compile(r'(?:\s*?`.*?`\s*?[\n]+){2,}', re.MULTILINE)
 
 
 class NoCodeBlockIssue(BaseIssue):
-    description = "Python code found in submission text but not encapsulated in a code block."
-    pattern = re.compile(r'''
-        ^(?:                    #Any of the following is on the left-hand margin (not four spaces in)
-        try                     #try block
-        |class\s.*?             #class detection
-        |def\s.*?\(.*?\)        #function detection
-        |for\s.*?\sin\s.*?      #for loop detection
-        ):
+    _description = "Python code found in submission text but not encapsulated in a code block."
+    _pattern = re.compile(r'''
+        ^(?:                        # any of the following is on the left-hand margin (not four spaces in)
+            try                     # try block
+            |class\s.*?             # class detection
+            |def\s.*?\(.*?\)        # function detection
+            |for\s.*?\sin\s.*?      # for loop detection
+        ):                          # END NON-CAPTURE GROUP -- literal colon
         ''', re.VERBOSE | re.MULTILINE)
 
 
 VALIDATORS = [MultipleInlineIssue(), NoCodeBlockIssue(), ]
 
 
+@logger.catch
 def get_reddit():
     config = configparser.ConfigParser()
     config.read("formatbot.cfg")
@@ -54,15 +70,17 @@ def get_reddit():
         client_secret=reddit_config['client_secret'],
         username=reddit_config['username'],
         password=reddit_config['password'],
-        user_agent='CodeFormatHelperBot',)
+        user_agent='CodeFormatHelperBot', )
     return reddit
 
 
+@logger.catch
 def get_comment(op, issues):
     issues_str = '\n'.join(f'{i}. {d}' for i, d in enumerate(issues, 1))
     return TEMPLATE.format(op=op, issues_str=issues_str)
 
 
+@logger.catch
 def judge_submissions():
     reddit = get_reddit()
     subreddit = reddit.subreddit('learnpython')
@@ -70,28 +88,32 @@ def judge_submissions():
     for submission in subreddit.stream.submissions():
         try:
             op = submission.author.name
-            body_text = submission.selftext
-            issues_found = [v.description for v in VALIDATORS if v.is_issue(body_text)]
+            submission_text = submission.selftext
+            issues_found = [str(v) for v in VALIDATORS if v.is_issue(submission_text)]
             if not issues_found:
-                print(f"no issues with {op}'s post")
+                logger.info(f"No issues found in {op}'s post")
                 continue
+            logger.info(f"Issues found in {op}'s submission")
+            for issue in issues_found:
+                logger.info(issue)
+
             for comment in submission.comments:
                 if comment.author.name.lower() == me:
-                    print(f"I've already commented on {op}'s post.")
+                    logger.info(f"I've already commented on {op}'s post. Moving on.")
                     break
             else:
-                print('I GOT BEEF WITH', op)
                 time_created = datetime.fromtimestamp(submission.created_utc)
-                time_current = datetime.now()
-                if (time_current - time_created <= MAX_TIME_LAPSE):
+                if datetime.now() - time_created <= MAX_TIME_LAPSE:
                     submission.reply(get_comment(op, issues_found))
-                    print('Replied to', op)
+                    logger.info(f"Comment left on {op}'s post")
                     time.sleep(10 * 60)  # comment cool-down, need karma!
+                    logger.info("Done sleeping for now.")
                 else:
-                    print('...but post is too old.')
+                    logger.info('No comment left due to age of post.')
         except Exception as exc:
             print(exc)
 
 
 if __name__ == '__main__':
+    logger.info('Bot started')
     judge_submissions()

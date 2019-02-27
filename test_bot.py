@@ -1,8 +1,6 @@
+import pytest
 
-from formatbot import (
-    NoCodeBlockIssue,
-    MultipleInlineIssue,
-)
+from formatbot import *
 
 text_def = '''
 x = 1
@@ -53,6 +51,22 @@ for tricking regex:
     except:
         pass
 '''
+def test_reddit_auth():
+    reddit = get_reddit()
+    config = configparser.ConfigParser()
+    config.read("formatbot.cfg")
+    conf_name = config['Reddit']['username']
+    login_name = reddit.user.me().name
+    assert conf_name == login_name
+
+def test_raise_not_implemented():
+    class TestClass(BaseIssue): pass
+    with pytest.raises(NotImplementedError):
+        x = TestClass()
+        print(str(x))
+    with pytest.raises(NotImplementedError):
+        x = TestClass()
+        print(x.is_issue(text_proper))
 
 def test_issues_regex():
     issue_block = NoCodeBlockIssue()
