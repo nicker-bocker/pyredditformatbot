@@ -1,8 +1,7 @@
-import pytest
 
-from formatbot_autodetect import (
-    IssueCodeBlock,
-    IssueMultiInline
+from formatbot import (
+    NoCodeBlockIssue,
+    MultipleInlineIssue,
 )
 
 text_def = '''
@@ -33,19 +32,32 @@ for x, y, z in collection:
    
 '''
 
+text_bare_try = '''
+Pls hLP my codes!!!
+try:
+x = "FrEe homEwork Hlp"
+except:
+pass
+'''
+
 text_proper = '''
+for tricking regex:
     def func(p):
         pass
     class MyClass:
         pass
     for x in y:
         pass
+    try:
+        x = True
+    except:
+        pass
 '''
 
-
 def test_issues_regex():
-    issue_block = IssueCodeBlock()
-    issue_inline = IssueMultiInline()
+    issue_block = NoCodeBlockIssue()
+    issue_inline = MultipleInlineIssue()
+    assert issue_block.is_issue(text_bare_try)
     assert issue_block.is_issue(text_def)
     assert issue_block.is_issue(text_class)
     assert issue_block.is_issue(text_forloop)
