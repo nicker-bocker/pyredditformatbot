@@ -1,6 +1,8 @@
 import pytest
-
+import utils
 from formatbot import *
+from issues import *
+
 
 text_def = '''
 x = 1
@@ -22,7 +24,7 @@ text_multi_inline = '''
     `pass`
 '''
 
-text_forloop = '''
+text_for_loop = '''
 Here is my issue 
 
 for x, y, z in collection:
@@ -52,12 +54,9 @@ for tricking regex:
         pass
 '''
 def test_reddit_auth():
-    reddit = get_reddit()
-    config = configparser.ConfigParser()
-    config.read("formatbot.cfg")
-    conf_name = config['Reddit']['username']
+    reddit = utils.get_reddit()
     login_name = reddit.user.me().name
-    assert conf_name == login_name
+    assert utils.USERNAME.lower() == login_name.lower()
 
 def test_raise_not_implemented():
     class TestClass(BaseIssue): pass
@@ -74,7 +73,7 @@ def test_issues_regex():
     assert issue_block.is_issue(text_bare_try)
     assert issue_block.is_issue(text_def)
     assert issue_block.is_issue(text_class)
-    assert issue_block.is_issue(text_forloop)
+    assert issue_block.is_issue(text_for_loop)
     assert issue_inline.is_issue(text_multi_inline)
     assert not issue_inline.is_issue(text_proper)
     assert not issue_block.is_issue(text_proper)
